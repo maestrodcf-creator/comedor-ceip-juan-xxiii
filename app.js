@@ -231,6 +231,8 @@ function renderInicio() {
 }
 
 function irAPerfil(tipo) {
+  cerrarOtrasSesiones(tipo);
+
   if (tipo === 'familias') {
     if (estado.pinFamilia) { cargarPanelFamilias(); } else { navegar('login-familias'); }
   } else if (tipo === 'profesorado') {
@@ -240,6 +242,25 @@ function irAPerfil(tipo) {
   } else if (tipo === 'admin') {
     if (estado.pinAdmin) { cargarPanelAdmin(); } else { navegar('login-admin'); }
   }
+}
+
+// Por seguridad, solo un perfil puede estar "recordado" a la vez en este
+// dispositivo. Al entrar a un perfil distinto del que ya estaba activo,
+// se cierra la sesión de los demás y hay que volver a introducir su PIN.
+function cerrarOtrasSesiones(tipoQueEntra) {
+  if (tipoQueEntra !== 'familias' && estado.pinFamilia) {
+    estado.pinFamilia = null; estado.alumnos = []; estado.nombreFamilia = null;
+  }
+  if (tipoQueEntra !== 'profesorado' && estado.claveProfesorado) {
+    estado.claveProfesorado = null; estado.listadoProfesorado = []; estado.claseProfesoradoNombre = null;
+  }
+  if (tipoQueEntra !== 'staff' && estado.pinStaff) {
+    estado.pinStaff = null; estado.listadoStaff = [];
+  }
+  if (tipoQueEntra !== 'admin' && estado.pinAdmin) {
+    estado.pinAdmin = null;
+  }
+  guardarSesion();
 }
 
 // ===== Guía de instalación como app (PWA) =====
