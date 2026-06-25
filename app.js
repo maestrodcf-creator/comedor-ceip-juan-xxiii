@@ -37,6 +37,24 @@ function mostrarToast(mensaje, ms = 2400) {
   setTimeout(() => toastEl.classList.remove('visible'), ms);
 }
 
+// ===== Menú mensual (consulta pública desde cualquier panel) =====
+
+async function abrirMenuMensual() {
+  mostrarToast('Buscando el menú…', 1500);
+  try {
+    const cliente = obtenerSupabaseClient();
+    const { data, error } = await cliente.from('comedor_menu_actual').select('*').eq('id', 1).single();
+    if (error || !data || !data.ruta_storage) {
+      mostrarToast('Todavía no se ha subido ningún menú.');
+      return;
+    }
+    const { data: urlData } = cliente.storage.from('comedor-menu').getPublicUrl(data.ruta_storage);
+    window.open(urlData.publicUrl, '_blank');
+  } catch (e) {
+    mostrarToast('No se pudo abrir el menú.');
+  }
+}
+
 function hoyISO() {
   const d = new Date();
   const tz = d.getTimezoneOffset() * 60000;
@@ -469,6 +487,7 @@ function renderPanelFamilias() {
         <h2>${estado.nombreFamilia ? escapeHtml(estado.nombreFamilia) : 'Tu familia'}</h2>
       </div>
       <div class="contenido">
+        <button class="accion-rapida" style="margin-bottom:1.25rem;border-color:var(--azul);color:var(--azul)" onclick="abrirMenuMensual()">📋 Ver menú del mes</button>
         <div class="fecha-actual">
           <div class="fecha-actual-icono">📅</div>
           <div class="fecha-actual-texto">${formatearFechaLarga(hoy)}</div>
@@ -651,6 +670,7 @@ function renderPanelProfesorado() {
         <h2>${estado.claseProfesoradoNombre ? escapeHtml(estado.claseProfesoradoNombre) : 'Tu clase'}</h2>
       </div>
       <div class="contenido">
+        <button class="accion-rapida" style="margin-bottom:1.25rem;border-color:var(--azul);color:var(--azul)" onclick="abrirMenuMensual()">📋 Ver menú del mes</button>
         <div class="selector-fecha-staff">
           <button class="btn-icono-pequeno" onclick="cambiarDiaProfesorado(-1)">‹</button>
           <input type="date" id="input-fecha-profesorado" value="${f}" onchange="cambiarFechaProfesorado(this.value)">
@@ -1629,11 +1649,76 @@ async function cargarYRenderConfig() {
         <div class="form-grupo"><label>PIN de administración</label><input id="cfg-pin-admin" value="${escapeHtml(cfg.pin_admin || '')}"></div>
         <button class="btn-principal azul" onclick="guardarConfig()">Guardar ajustes</button>
       </div>
+
+      <div class="tarjeta-admin">
+        <div class="form-grupo" style="margin-bottom:6px"><label>Menú mensual</label></div>
+        <div id="menu-actual-info"><div class="cargando" style="padding:1rem"><div class="spinner"></div></div></div>
+        <input type="file" id="menu-archivo-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="manejarSubidaMenu(this)">
+        <button class="btn-secundario" style="margin-top:10px" onclick="document.getElementById('menu-archivo-input').click()">📋 Subir nuevo menú (PDF o imagen)</button>
+        <div id="resultado-subida-menu"></div>
+      </div>
     `;
+    cargarInfoMenuActual();
   } catch (e) {
     cont.innerHTML = `<div class="vacio-estado"><p>No se pudieron cargar los ajustes.</p></div>`;
   }
 }
+
+async function cargarInfoMenuActual() {
+  const cont = document.getElementById('menu-actual-info');
+  if (!cont) return;
+  try {
+    const { data } = await supabaseClient.from('comedor_menu_actual').select('*').eq('id', 1).single();
+    if (data && data.nombre_archivo) {
+      const fecha = new Date(data.subido_en).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+      cont.innerHTML = `
+        <div class="fila-staff" style="margin-bottom:10px">
+          <span class="punto-estado si"></span>
+          <span>${escapeHtml(data.nombre_archivo)} <span style="color:var(--marron-suave);font-weight:500">· subido el ${fecha}</span></span>
+        </div>
+      `;
+    } else {
+      cont.innerHTML = `<p style="font-size:13px;color:var(--marron-suave);font-weight:500;margin:0 0 10px">Todavía no se ha subido ningún menú.</p>`;
+    }
+  } catch (e) {
+    cont.innerHTML = `<p style="font-size:13px;color:var(--marron-suave);font-weight:500;margin:0 0 10px">Todavía no se ha subido ningún menú.</p>`;
+  }
+}
+
+async function manejarSubidaMenu(inputEl) {
+  const archivo = inputEl.files[0];
+  if (!archivo) return;
+
+  const resultadoCont = document.getElementById('resultado-subida-menu');
+  resultadoCont.innerHTML = `<div class="cargando" style="padding:1rem"><div class="spinner"></div>Subiendo menú…</div>`;
+
+  const extension = archivo.name.split('.').pop().toLowerCase();
+  const tipoArchivo = extension === 'pdf' ? 'pdf' : 'imagen';
+  const nombreStorage = `menu_${Date.now()}.${extension}`;
+
+  try {
+    const cliente = obtenerSupabaseClient();
+    const { error: errorSubida } = await cliente.storage
+      .from('comedor-menu')
+      .upload(nombreStorage, archivo, { upsert: true });
+
+    if (errorSubida) throw errorSubida;
+
+    await rpc('comedor_admin_actualizar_menu', {
+      p_pin: estado.pinAdmin,
+      p_nombre_archivo: archivo.name,
+      p_ruta_storage: nombreStorage,
+      p_tipo_archivo: tipoArchivo
+    });
+
+    resultadoCont.innerHTML = `<div class="pin-generado visible">✅ Menú actualizado correctamente.</div>`;
+    await cargarInfoMenuActual();
+  } catch (e) {
+    resultadoCont.innerHTML = `<div class="mensaje-error visible">No se pudo subir el menú. Inténtalo de nuevo.</div>`;
+  }
+  inputEl.value = '';
+}
+
 
 async function guardarConfig() {
   const cambios = {
